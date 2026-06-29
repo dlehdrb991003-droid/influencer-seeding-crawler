@@ -23,6 +23,7 @@ async function launchBrowser() {
   return puppeteer.launch({
     executablePath: CHROME_PATH,
     headless: true,
+    protocolTimeout: 60000,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -58,8 +59,9 @@ app.post('/youtube/about', async (req, res) => {
   const results = [];
 
   async function scrapeChannel(channelId, handle) {
-    const page = await browser.newPage();
+    let page;
     try {
+      page = await browser.newPage();
       await page.setUserAgent(
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
       );
@@ -122,13 +124,13 @@ app.post('/youtube/about', async (req, res) => {
       console.error(`[youtube/about] ${channelId} error:`, err.message);
       return { channelId, email: null, instagramLink: null };
     } finally {
-      try { await page.close(); } catch {}
+      if (page) try { await page.close(); } catch {}
     }
   }
 
   try {
-    // 5개씩 병렬 처리
-    const BATCH = 5;
+    // 3개씩 병렬 처리 (Railway 메모리 제한으로 5개 동시 시 크래시)
+    const BATCH = 3;
     for (let i = 0; i < channels.length; i += BATCH) {
       const batch = channels.slice(i, i + BATCH);
       const batchResults = await Promise.all(batch.map(({ channelId, handle }) => scrapeChannel(channelId, handle)));
