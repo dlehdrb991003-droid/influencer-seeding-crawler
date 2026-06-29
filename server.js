@@ -57,54 +57,60 @@ app.post('/youtube/about', async (req, res) => {
   const browser = await launchBrowser();
   const results = [];
 
+  async function scrapeChannel(channelId, handle) {
+    const page = await browser.newPage();
+    try {
+      await page.setUserAgent(
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+      );
+
+      const url = handle
+        ? `https://www.youtube.com/${handle}/about`
+        : `https://www.youtube.com/channel/${channelId}/about`;
+
+      await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+
+      const redirectLinks = await page.$$eval(
+        'a[href*="youtube.com/redirect"]',
+        els => els.map(el => {
+          try {
+            const u = new URL(el.getAttribute('href'));
+            return u.searchParams.get('q') || '';
+          } catch { return ''; }
+        }).filter(Boolean)
+      );
+
+      const descText = await page.evaluate(() => {
+        const el = document.querySelector(
+          'ytd-channel-about-metadata-renderer, #description-container, #bio'
+        );
+        return el ? el.textContent : '';
+      });
+
+      const email =
+        redirectLinks.find(l => l.startsWith('mailto:'))?.slice(7) ??
+        extractEmail(descText);
+      const instagramLink =
+        redirectLinks.find(l => l.includes('instagram.com/')) ??
+        extractInstagram(descText);
+
+      console.log(`[youtube/about] ${channelId}: email=${email}, ig=${instagramLink}`);
+      return { channelId, email: email ?? null, instagramLink: instagramLink ?? null };
+    } catch (err) {
+      console.error(`[youtube/about] ${channelId} error:`, err.message);
+      return { channelId, email: null, instagramLink: null };
+    } finally {
+      await page.close();
+    }
+  }
+
   try {
-    for (const { channelId, handle } of channels) {
-      const page = await browser.newPage();
-      try {
-        await page.setUserAgent(
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-        );
-
-        const url = handle
-          ? `https://www.youtube.com/${handle}/about`
-          : `https://www.youtube.com/channel/${channelId}/about`;
-
-        await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
-
-        // YouTube 외부 링크는 redirect URL로 래핑됨 → q 파라미터 디코딩
-        const redirectLinks = await page.$$eval(
-          'a[href*="youtube.com/redirect"]',
-          els => els.map(el => {
-            try {
-              const u = new URL(el.getAttribute('href'));
-              return u.searchParams.get('q') || '';
-            } catch { return ''; }
-          }).filter(Boolean)
-        );
-
-        // 채널 설명 텍스트에서도 이메일/인스타 추출
-        const descText = await page.evaluate(() => {
-          const el = document.querySelector(
-            'ytd-channel-about-metadata-renderer, #description-container, #bio'
-          );
-          return el ? el.textContent : '';
-        });
-
-        const email =
-          redirectLinks.find(l => l.startsWith('mailto:'))?.slice(7) ??
-          extractEmail(descText);
-        const instagramLink =
-          redirectLinks.find(l => l.includes('instagram.com/')) ??
-          extractInstagram(descText);
-
-        results.push({ channelId, email: email ?? null, instagramLink: instagramLink ?? null });
-        console.log(`[youtube/about] ${channelId}: email=${email}, ig=${instagramLink}`);
-      } catch (err) {
-        console.error(`[youtube/about] ${channelId} error:`, err.message);
-        results.push({ channelId, email: null, instagramLink: null });
-      } finally {
-        await page.close();
-      }
+    // 5개씩 병렬 처리
+    const BATCH = 5;
+    for (let i = 0; i < channels.length; i += BATCH) {
+      const batch = channels.slice(i, i + BATCH);
+      const batchResults = await Promise.all(batch.map(({ channelId, handle }) => scrapeChannel(channelId, handle)));
+      results.push(...batchResults);
     }
   } finally {
     await browser.close();
