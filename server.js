@@ -23,14 +23,12 @@ async function launchBrowser() {
   return puppeteer.launch({
     executablePath: CHROME_PATH,
     headless: true,
-    protocolTimeout: 60000,
+    protocolTimeout: 15000,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-gpu',
-      '--single-process',
-      '--no-zygote',
     ],
   });
 }
