@@ -68,8 +68,22 @@ app.post('/youtube/about', async (req, res) => {
         ? `https://www.youtube.com/${handle}/about`
         : `https://www.youtube.com/channel/${channelId}/about`;
 
-      await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+      // domcontentloaded: 리다이렉트 시 "Navigating frame was detached" 오류 방지
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      // JS 렌더링 대기
+      await new Promise(r => setTimeout(r, 2500));
 
+      // "이메일 주소 보기" 버튼 클릭 시도 (숨겨진 이메일 노출)
+      try {
+        await page.evaluate(() => {
+          const btn = [...document.querySelectorAll('button, tp-yt-paper-button')]
+            .find(b => /이메일|email/i.test(b.textContent));
+          if (btn) btn.click();
+        });
+        await new Promise(r => setTimeout(r, 1000));
+      } catch {}
+
+      // youtube.com/redirect 링크에서 Instagram, 이메일 추출
       const redirectLinks = await page.$$eval(
         'a[href*="youtube.com/redirect"]',
         els => els.map(el => {
@@ -80,11 +94,19 @@ app.post('/youtube/about', async (req, res) => {
         }).filter(Boolean)
       );
 
+      // 설명 텍스트에서 이메일 추출 (여러 셀렉터 순차 시도)
       const descText = await page.evaluate(() => {
-        const el = document.querySelector(
-          'ytd-channel-about-metadata-renderer, #description-container, #bio'
-        );
-        return el ? el.textContent : '';
+        for (const sel of [
+          'ytd-channel-about-metadata-renderer',
+          '#description-container',
+          'yt-formatted-string#description',
+          '#bio',
+          'ytd-about-channel-renderer',
+        ]) {
+          const el = document.querySelector(sel);
+          if (el?.textContent?.trim()) return el.textContent;
+        }
+        return '';
       });
 
       const email =
