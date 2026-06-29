@@ -100,7 +100,7 @@ app.post('/youtube/about', async (req, res) => {
       console.error(`[youtube/about] ${channelId} error:`, err.message);
       return { channelId, email: null, instagramLink: null };
     } finally {
-      await page.close();
+      try { await page.close(); } catch {}
     }
   }
 
